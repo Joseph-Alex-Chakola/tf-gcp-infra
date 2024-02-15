@@ -22,4 +22,3 @@ To get started with using Google Cloud Platform (GCP) services, you need to enab
    - Follow the same steps as above to reach the "Enable APIs and Services" page.
    - Search for "Identity and Access Management (IAM)" in the search bar.
    - Click on the "Identity and Access Management (IAM) API" from the search results.
-   - Click the "Enable" button to enable the IAM service for your project.
