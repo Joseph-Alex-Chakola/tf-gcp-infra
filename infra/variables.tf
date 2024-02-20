@@ -1,27 +1,22 @@
 variable "gcp_svc_key" {
-    
+
 }
 variable "gcp_project" {
-  
+
 }
 variable "gcp_region" {
-  
+
 }
-variable "gcp_vpc_name" {
-  
-}
-variable "subnet_name_1" {
-  
-}
-variable "subnet_1_cidr" {
-  
-}
-variable "subnet_name_2" {
-  
-}
-variable "subnet_2_cidr" {
-  
-}
-variable "subnet_1_custom_route" {
-  
+variable "gcp_vpc" {
+  type = list(
+    object({
+      name                  = string
+      routing_mode          = string
+      subnet_name_1         = string
+      subnet_1_cidr         = string
+      subnet_name_2         = string
+      subnet_2_cidr         = string
+      subnet_1_custom_route = string
+    })
+  )
 }
