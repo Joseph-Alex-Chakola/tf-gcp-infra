@@ -26,6 +26,15 @@ variable "gcp_vpc" {
       image                 = string
       disk_size             = number
       disk_type             = string
+      db_instance_name      = string
+      db_version            = string
+      db_tier               = string
+      db_disk_type          = string
+      db_disk_size          = number
+      availability_type     = string
+      global_address_name   = string
+      db_name               = string
+      db_username           = string
     })
   )
 }
