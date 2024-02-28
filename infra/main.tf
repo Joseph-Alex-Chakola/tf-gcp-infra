@@ -49,7 +49,7 @@ resource "google_compute_firewall" "deny_ssh_inbound" {
   count   = length(var.gcp_vpc)
   name    = "${var.gcp_vpc[count.index].firewall_name}-ssh-inbound"
   network = google_compute_network.VPC[count.index].id
-  allow {
+  deny {
     protocol = "tcp"
     ports    = ["22"]
   }
@@ -80,7 +80,7 @@ resource "google_compute_instance" "webapp" {
     db_username = var.gcp_vpc[count.index].db_username,
     db_name     = var.gcp_vpc[count.index].db_name,
     db_host     = google_sql_database_instance.db_instance[count.index].ip_address[0].ip_address,
-    db_port     =  5432
+    db_port     = 5432
   }
   tags = ["webapp-firewall"]
 }
@@ -99,7 +99,7 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   network                 = google_compute_network.VPC[count.index].id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_range[count.index].name]
-  deletion_policy = "ABANDON"
+  deletion_policy         = "ABANDON"
 }
 # Creating a google_cloud_sql_instance
 resource "google_sql_database_instance" "db_instance" {
@@ -127,8 +127,8 @@ resource "google_sql_database_instance" "db_instance" {
 }
 # Creating a database
 resource "google_sql_database" "database" {
-  count = length(var.gcp_vpc)
-  name = var.gcp_vpc[count.index].db_name
+  count    = length(var.gcp_vpc)
+  name     = var.gcp_vpc[count.index].db_name
   instance = google_sql_database_instance.db_instance[count.index].name
 }
 # Random password generation
@@ -138,11 +138,11 @@ resource "random_password" "password" {
 }
 # Creating a user
 resource "google_sql_user" "new_user" {
-  count    = length(var.gcp_vpc)
-  name     = var.gcp_vpc[count.index].db_username
-  instance = google_sql_database_instance.db_instance[count.index].name
-  password = random_password.password.result
-  depends_on = [google_sql_database_instance.db_instance]
+  count           = length(var.gcp_vpc)
+  name            = var.gcp_vpc[count.index].db_username
+  instance        = google_sql_database_instance.db_instance[count.index].name
+  password        = random_password.password.result
+  depends_on      = [google_sql_database_instance.db_instance]
   deletion_policy = "ABANDON"
 }
 
