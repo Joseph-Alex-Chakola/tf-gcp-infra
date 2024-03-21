@@ -56,6 +56,29 @@ resource "google_compute_firewall" "deny_ssh_inbound" {
   direction     = "INGRESS"
   source_ranges = var.gcp_vpc[count.index].firewall_source_range
 }
+# Creating a service account
+resource "google_service_account" "service_account" {
+  count = length(var.gcp_vpc)
+  account_id   = var.gcp_vpc[count.index].service_account
+  display_name = var.gcp_vpc[count.index].service_account_display_name
+  project =  var.gcp_project
+}
+resource "google_project_iam_binding" "logging_admin" {
+  count  = length(var.gcp_vpc)
+  project = var.gcp_project
+  role    = "roles/logging.admin"
+  members = [
+    "serviceAccount:${google_service_account.service_account[count.index].email}"
+  ]
+}
+resource "google_project_iam_binding" "monitoring_metric_writer" {
+  count  = length(var.gcp_vpc)
+  project = var.gcp_project
+  role    = "roles/monitoring.metricWriter"
+  members = [
+    "serviceAccount:${google_service_account.service_account[count.index].email}"
+  ]
+}
 # Creating a Compute Engine instance with the VPC network
 resource "google_compute_instance" "webapp" {
   count        = length(var.gcp_vpc)
@@ -74,6 +97,10 @@ resource "google_compute_instance" "webapp" {
     subnetwork = google_compute_subnetwork.subnet[count.index].id
     access_config {
     }
+  }
+  service_account {
+    email  = google_service_account.service_account[count.index].email
+    scopes = ["cloud-platform"]
   }
   metadata = {
     db_password = random_password.password.result,
@@ -145,4 +172,11 @@ resource "google_sql_user" "new_user" {
   depends_on      = [google_sql_database_instance.db_instance]
   deletion_policy = "ABANDON"
 }
-
+resource "google_dns_record_set" "new_record" {
+  count    = length(var.gcp_vpc)
+  name     = var.gcp_vpc[count.index].dns_name
+  type     = "A"
+  ttl      = 300
+  managed_zone = var.gcp_vpc[count.index].dns_zone_name
+  rrdatas = [google_compute_instance.webapp[count.index].network_interface[0].access_config[0].nat_ip]
+}
