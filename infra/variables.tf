@@ -47,6 +47,10 @@ variable "gcp_vpc" {
       serverless_function_entry_point = string
       connector_ip_cidr_range         = string
       cloud_function_service_account  = string
+      distribution_policy_zones       = list(string)
+      autoscaler_name                 = string
+      domain_name                     = string
+      api_key                         = string
     })
   )
 }
