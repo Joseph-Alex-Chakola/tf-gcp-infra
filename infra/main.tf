@@ -21,6 +21,80 @@ resource "google_compute_subnetwork" "subnet2" {
   network       = google_compute_network.VPC[count.index].id
   region        = var.gcp_region
 }
+resource "random_string" "random" {
+  length  = 5
+  special = false
+  upper   = true
+  lower   = true
+  numeric = true
+}
+# Creating a key ring
+resource "google_kms_key_ring" "key_ring" {
+  name     = "my-key-ring-${random_string.random.result}"
+  location = var.gcp_region
+  project  = var.gcp_project
+}
+# Creating a key
+resource "google_kms_crypto_key" "vm_crypto_key" {
+  name       = "vm-crypto-key-${random_string.random.result}"
+  key_ring   = "projects/${var.gcp_project}/locations/${var.gcp_region}/keyRings/${google_kms_key_ring.key_ring.name}"
+  purpose    = "ENCRYPT_DECRYPT"
+  depends_on = [google_kms_key_ring.key_ring]
+}
+# Creating a key
+resource "google_kms_crypto_key" "db_crypto_key" {
+  name       = "db-crypto-key-${random_string.random.result}"
+  key_ring   = "projects/${var.gcp_project}/locations/${var.gcp_region}/keyRings/${google_kms_key_ring.key_ring.name}"
+  purpose    = "ENCRYPT_DECRYPT"
+  depends_on = [google_kms_key_ring.key_ring]
+
+}
+# Creating a key
+resource "google_kms_crypto_key" "storage_crypto_key" {
+  name            = "storage-crypto-key-${random_string.random.result}"
+  key_ring        = "projects/${var.gcp_project}/locations/${var.gcp_region}/keyRings/${google_kms_key_ring.key_ring.name}"
+  rotation_period = "2592000s"
+  depends_on      = [google_kms_key_ring.key_ring]
+}
+# Creating a service account
+resource "google_project_service_identity" "gcp_sa_cloud_sql" {
+  provider   = google-beta
+  service    = "sqladmin.googleapis.com"
+  depends_on = [google_kms_key_ring.key_ring]
+}
+resource "google_kms_crypto_key_iam_binding" "crypto_key" {
+  provider      = google
+  crypto_key_id = google_kms_crypto_key.db_crypto_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  members = [
+    "serviceAccount:${google_project_service_identity.gcp_sa_cloud_sql.email}",
+  ]
+}
+# Creating a service account
+data "google_project" "current" {
+}
+locals {
+  cloud_storage_service_account = "service-${data.google_project.current.number}@gs-project-accounts.iam.gserviceaccount.com"
+}
+
+resource "google_kms_crypto_key_iam_binding" "kms_key_binding" {
+  crypto_key_id = google_kms_crypto_key.storage_crypto_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  members = [
+    "serviceAccount:${local.cloud_storage_service_account}",
+  ]
+}
+# Creating a IAM binding for the key
+locals {
+  cloud_vm_service_account = "service-${data.google_project.current.number}@compute-system.iam.gserviceaccount.com"
+}
+resource "google_kms_crypto_key_iam_binding" "vm_crypto_key_binding" {
+  crypto_key_id = google_kms_crypto_key.vm_crypto_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  members = [
+    "serviceAccount:${local.cloud_vm_service_account}",
+  ]
+}
 
 # Creating a route for VPC
 resource "google_compute_route" "webapp-route" {
@@ -170,6 +244,9 @@ resource "google_compute_instance_template" "webapp_template" {
     boot         = true
     disk_size_gb = var.gcp_vpc[count.index].disk_size
     disk_type    = var.gcp_vpc[count.index].disk_type
+    disk_encryption_key {
+      kms_key_self_link = google_kms_crypto_key.vm_crypto_key.id
+    }
   }
   network_interface {
     network    = google_compute_network.VPC[count.index].name
@@ -235,7 +312,7 @@ resource "google_compute_region_autoscaler" "webapp_autoscaler" {
   target     = google_compute_region_instance_group_manager.webapp_igm[count.index].id
   depends_on = [google_compute_region_autoscaler.webapp_autoscaler]
   autoscaling_policy {
-    max_replicas    = 2
+    max_replicas    = 3
     min_replicas    = 1
     cooldown_period = 90
     cpu_utilization {
@@ -266,6 +343,7 @@ resource "google_sql_database_instance" "db_instance" {
   database_version    = var.gcp_vpc[count.index].db_version
   region              = var.gcp_region
   deletion_protection = false
+  encryption_key_name = google_kms_crypto_key.db_crypto_key.id
   depends_on          = [google_service_networking_connection.private_vpc_connection]
   settings {
     tier = var.gcp_vpc[count.index].db_tier
@@ -353,9 +431,11 @@ resource "google_pubsub_topic" "email" {
 resource "google_storage_bucket" "bucket" {
   count         = length(var.gcp_vpc)
   name          = var.gcp_vpc[count.index].serverless_bucket_name
-  location      = "US"
+  location      = var.gcp_region
   force_destroy = true
-
+  encryption {
+    default_kms_key_name = google_kms_crypto_key.storage_crypto_key.id
+  }
 }
 resource "google_storage_bucket_object" "object" {
   count  = length(var.gcp_vpc)
@@ -394,7 +474,7 @@ resource "google_cloudfunctions2_function" "serverless_mail" {
   service_config {
     available_memory               = "256M"
     timeout_seconds                = 60
-    max_instance_count             = 3
+    max_instance_count             = 4
     min_instance_count             = 2
     ingress_settings               = "ALLOW_INTERNAL_ONLY"
     all_traffic_on_latest_revision = true
@@ -435,6 +515,7 @@ module "gce-lb-http" {
   target_tags                     = ["webapp-firewall"]
   ssl                             = true
   managed_ssl_certificate_domains = [var.gcp_vpc[count.index].domain_name]
+  https_redirect = true
   backends = {
     default = {
       protocol    = "HTTP"
